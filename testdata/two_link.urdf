@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<robot name="two_link_arm">
+  <link name="base_link">
+    <visual name="base_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.4 0.4 0.1"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="forearm_link">
+    <inertial>
+      <origin xyz="0.5 0 0" rpy="0 0 0"/>
+      <mass value="2.0"/>
+      <inertia ixx="0.02" ixy="0" ixz="0" iyy="0.3" iyz="0" izz="0.3"/>
+    </inertial>
+    <collision>
+      <geometry>
+        <cylinder radius="0.05" length="1.0"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="shoulder_yaw" type="revolute">
+    <parent link="base_link"/>
+    <child link="forearm_link"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.57" upper="1.57" effort="20" velocity="3"/>
+  </joint>
+</robot>
