@@ -28,5 +28,14 @@ The file parser accepts XML declarations, nested elements, empty element tags,
 and string-valued attributes. It intentionally rejects mismatched tags and
 invalid joint parent/child references during elaboration.
 
-Tests use the local `~/dev/lean_test` package through Lake and keep fixtures in
-`testdata/`.
+Dependencies are pinned through Lake. Run the tests with:
+
+```bash
+lake test
+```
+
+Test fixtures live in `testdata/`.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
