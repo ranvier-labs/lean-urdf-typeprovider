@@ -127,6 +127,28 @@ structure SensorNoise where
   stddev : Float := 0.0
   deriving Repr, BEq, Inhabited
 
+/--
+A stereo depth camera's error model (an extension, `<camera><stereo …/></camera>`): depth
+comes from disparity `d = f·b/z` at the real imager's focal length `f` (pixels, from
+`realWidth` and the field of view) and `baseline` `b` (m), with Gaussian disparity noise
+`disparityNoise` (px) and quantization to `subpixel` (px); no return below `minDepth` (m);
+the left imager's band that the right one does not see (`x < f·b/z`) is invalid; pixels at
+depth edges (relative step to a neighbour above `edgeThreshold`) drop out with probability
+`edgeDropout`, any pixel with `dropout`. Defaults: an Intel RealSense D435 at 848×480.
+-/
+structure StereoSpec where
+  baseline : Float := 0.05
+  disparityNoise : Float := 0.08
+  subpixel : Float := 0.08
+  minDepth : Float := 0.105
+  edgeThreshold : Float := 0.05
+  edgeDropout : Float := 0.5
+  dropout : Float := 0.0
+  /-- The real imager's size (pixels); 0: the simulated image's. -/
+  realWidth : Nat := 848
+  realHeight : Nat := 480
+  deriving Repr, BEq, Inhabited
+
 /-- A pinhole camera: image size, horizontal field of view (rad), pixel format, clip planes. -/
 structure CameraSpec where
   width : Nat := 320
@@ -136,6 +158,7 @@ structure CameraSpec where
   near : Float := 0.05
   far : Float := 100.0
   noise? : Option SensorNoise := none
+  stereo? : Option StereoSpec := none
   deriving Repr, BEq, Inhabited
 
 /-- One scan axis of a ray sensor: `samples` rays from `minAngle` to `maxAngle` (rad). -/
@@ -182,6 +205,9 @@ structure Sensor where
   imu? : Option ImuSpec := none
   /-- Contact sensors: the collision elements they report (Gazebo `<contact><collision>`). -/
   collisions : Array String := #[]
+  /-- What of its own robot the sensor ignores (an extension: `self_filter` attribute or
+  element): `mount` (the body it is mounted in, default when empty), `robot`, `none`. -/
+  selfFilter : String := ""
   deriving Repr, BEq, Inhabited
 
 structure Robot where

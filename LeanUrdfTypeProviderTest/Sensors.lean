@@ -32,6 +32,11 @@ def testGazeboSensors : IO Unit := do
   let c := depth.camera?.get!
   LeanTest.assertTrue (c.width == 848 && c.height == 480 && near c.hfov 1.5184 && near c.near 0.105 && near c.far 10)
   LeanTest.assertTrue (c.noise? == some { mean := 0, stddev := 0.007 })
+  let want : StereoSpec := {
+    baseline := 0.055, disparityNoise := 0.1, subpixel := 0.125, minDepth := 0.28,
+    edgeThreshold := 0.04, edgeDropout := 0.6, dropout := 0, realWidth := 1280, realHeight := 720 }
+  LeanTest.assertTrue (c.stereo? == some want)
+  LeanTest.assertEqual depth.selfFilter ""
   let lidar := (robot.findSensor? "mid360").get!
   LeanTest.assertTrue (lidar.kind == .lidar && lidar.rawType == "gpu_lidar" && lidar.parent == "base")
   let r := lidar.ray?.get!
@@ -39,6 +44,7 @@ def testGazeboSensors : IO Unit := do
   LeanTest.assertTrue (r.vertical.samples == 32 && near r.vertical.minAngle (-0.1222) && near r.vertical.maxAngle 0.9076)
   LeanTest.assertTrue (near r.minRange 0.1 && near r.maxRange 40 && near r.rangeResolution 0.01)
   LeanTest.assertTrue (r.noise?.map (·.stddev) == some 0.02)
+  LeanTest.assertEqual lidar.selfFilter "robot"
   let imu := (robot.findSensor? "imu").get!
   LeanTest.assertTrue (imu.kind == .imu && near imu.updateRate 500)
   LeanTest.assertTrue (imu.imu?.get!.gyroNoise?.map (·.stddev) == some 2e-4)
@@ -68,6 +74,20 @@ def testOverlay : IO Unit := do
   -- Overlay sensors replace base sensors of the same name.
   let twice ← IO.ofExcept (robot.merge (← IO.ofExcept (Robot.parseOverlay (← IO.FS.readFile "testdata/sensors_overlay.urdf"))))
   LeanTest.assertEqual (twice.sensors.map (·.name)) #["base_imu", "tip_camera"]
+
+@[test]
+def testStereoDefaultsAndSelfFilter : IO Unit := do
+  let src := "<robot name=\"r\"><link name=\"a\"/><gazebo reference=\"a\"><sensor name=\"d\" type=\"depth\" self_filter=\"none\">" ++
+    "<camera><stereo><baseline>0.06</baseline></stereo></camera></sensor></gazebo></robot>"
+  let robot ← IO.ofExcept (Robot.parse src)
+  let d := (robot.findSensor? "d").get!
+  LeanTest.assertEqual d.selfFilter "none"
+  let st := d.camera?.get!.stereo?.get!
+  LeanTest.assertTrue (near st.baseline 0.06 && near st.disparityNoise 0.08 && st.realWidth == 848 && near st.minDepth 0.105)
+  let bad := "<robot name=\"r\"><link name=\"a\"/><sensor name=\"s\" type=\"imu\" self_filter=\"head\"><parent link=\"a\"/></sensor></robot>"
+  match Robot.parse bad with
+  | .ok _ => LeanTest.fail "accepted self_filter=head"
+  | .error _ => pure ()
 
 @[test]
 def testXmlText : IO Unit := do

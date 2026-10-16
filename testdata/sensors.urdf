@@ -40,12 +40,13 @@
         <image><width>848</width><height>480</height><format>R_FLOAT32</format></image>
         <clip><near>0.105</near><far>10</far></clip>
         <noise><type>gaussian</type><mean>0.0</mean><stddev>0.007</stddev></noise>
+        <stereo baseline="0.055" disparity_noise="0.1" subpixel="0.125" min_depth="0.28" edge_threshold="0.04" edge_dropout="0.6" real_width="1280" real_height="720"/>
       </camera>
     </sensor>
   </gazebo>
   <gazebo reference="base">
     <material>Gazebo/Grey</material>
-    <sensor name="mid360" type="gpu_lidar">
+    <sensor name="mid360" type="gpu_lidar" self_filter="robot">
       <update_rate>10</update_rate>
       <lidar>
         <scan>

@@ -45,6 +45,20 @@ Supported URDF subset:
   with `<update_rate>`, `<pose>`, `<camera>`, `<ray>`/`<lidar>` (`<scan>`, `<range>`),
   `<imu>`, `<contact>` and Gaussian `<noise>`
 
+Two extensions beyond URDF and SDF: a sensor's `self_filter` (attribute or element: `mount`,
+`robot` or `none`, what of its own robot it ignores; empty by default), and a stereo depth
+camera's error model inside its `<camera>`:
+
+```xml
+<stereo baseline="0.05" disparity_noise="0.08" subpixel="0.08" min_depth="0.105"
+        edge_threshold="0.05" edge_dropout="0.5" dropout="0" real_width="848" real_height="480"/>
+```
+
+(`StereoSpec`; values as attributes or child elements, absent ones at these defaults, an
+Intel RealSense D435 at 848×480): depth from disparity `f·b/z` at the real imager's focal
+length, Gaussian disparity noise and subpixel quantization (px), minimum depth (m), the
+left imager's invalid band, and dropout at depth edges and anywhere.
+
 Sensors often live apart from a robot's description. An overlay is a `<robot>` file with
 only sensors (or other parts) that name the base file's links:
 

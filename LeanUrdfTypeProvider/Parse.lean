@@ -250,6 +250,23 @@ def parseNoise (elem : XmlElement) : Except String SensorNoise := do
 def parseNoiseIn? (elem : XmlElement) : Except String (Option SensorNoise) :=
   (elem.child? "noise").mapM parseNoise
 
+/-- `<stereo baseline disparity_noise subpixel min_depth edge_threshold edge_dropout dropout
+real_width real_height/>` (attributes or child elements; absent ones keep `StereoSpec`'s
+defaults). -/
+def parseStereo (elem : XmlElement) : Except String StereoSpec := do
+  let d : StereoSpec := {}
+  pure {
+    baseline := ← numberOr "stereo" elem "baseline" d.baseline
+    disparityNoise := ← numberOr "stereo" elem "disparity_noise" d.disparityNoise
+    subpixel := ← numberOr "stereo" elem "subpixel" d.subpixel
+    minDepth := ← numberOr "stereo" elem "min_depth" d.minDepth
+    edgeThreshold := ← numberOr "stereo" elem "edge_threshold" d.edgeThreshold
+    edgeDropout := ← numberOr "stereo" elem "edge_dropout" d.edgeDropout
+    dropout := ← numberOr "stereo" elem "dropout" d.dropout
+    realWidth := ← natOr "stereo" elem "real_width" d.realWidth
+    realHeight := ← natOr "stereo" elem "real_height" d.realHeight
+  }
+
 /-- A camera: urdfdom's `<camera><image width height hfov format near far/></camera>` or
 SDF's `<camera><horizontal_fov/><image><width/><height/><format/></image><clip><near/><far/></clip></camera>`. -/
 def parseCamera (elem : XmlElement) : Except String CameraSpec := do
@@ -269,6 +286,7 @@ def parseCamera (elem : XmlElement) : Except String CameraSpec := do
     far := ← match ← numberOf? "camera.image" image "far" with
       | some f => pure f | none => numberOr "camera.clip" clip "far" d.far
     noise? := ← parseNoiseIn? elem
+    stereo? := ← (elem.child? "stereo").mapM parseStereo
   }
 
 def parseRayAxis (ctx : String) (elem : XmlElement) : Except String RayAxis := do
@@ -347,6 +365,10 @@ def parseSensor (elem : XmlElement) (reference : Option String := none) : Except
     ray? := ← ray.mapM parseRay
     imu? := ← (elem.child? "imu").mapM parseImu
     collisions := ((elem.child? "contact").map fun c => (c.childrenNamed "collision").map (·.text)).getD #[]
+    selfFilter := ← match (elem.attr? "self_filter").orElse fun _ => elem.textAt? ["self_filter"] with
+      | none => pure ""
+      | some f => if ["mount", "robot", "none"].contains f then pure f
+        else .error s!"{ctx}: self_filter must be mount, robot or none, got '{f}'"
   }
 
 /-- Every sensor of a `<robot>`: its `<sensor>` children and the `<sensor>`s of its
