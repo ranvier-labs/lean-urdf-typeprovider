@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Features of real robot descriptions: comments, exponents, namespaces, entities. -->
+<robot name="quad &amp; probe" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <material name="dark">
+    <color rgba="0.1 0.1 0.1 1"/>
+  </material>
+  <link name="world"/>
+  <joint name="floating_base" type="floating">
+    <parent link="world"/>
+    <child link="base"/>
+  </joint>
+  <link name="base">
+    <inertial>
+      <origin xyz="2.1E-02 -1e-3 .5" rpy="0 0 0"/>
+      <mass value="6.921"/>
+      <inertia ixx="0.02448" ixy="1.2166E-04" ixz="0.0014849" iyy="0.098077" iyz="-3.12E-05" izz="0.107"/>
+    </inertial>
+    <visual>
+      <geometry><mesh filename="package://quad/meshes/base.dae" scale="1 1 1"/></geometry>
+      <material name="dark"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.3762 0.0935 0.114"/></geometry>
+    </collision>
+  </link>
+  <link name="calf">
+    <!-- a foot -->
+    <collision>
+      <origin xyz="0 0 -0.213" rpy="0 0 0"/>
+      <geometry><sphere radius="0.022"/></geometry>
+    </collision>
+  </link>
+  <joint name="knee" type='revolute'>
+    <origin rpy="0 0 0" xyz="0 -0.0955 -0.213"/>
+    <parent link="base"/>
+    <child link="calf"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-2.7227" upper="-0.83776" effort="45.43" velocity="15.7"/>
+    <dynamics damping="0.01" friction="0.2"/>
+  </joint>
+</robot>

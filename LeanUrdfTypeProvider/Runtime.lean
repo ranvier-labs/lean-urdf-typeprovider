@@ -37,10 +37,18 @@ inductive Geometry where
   | unsupported (tag : String)
   deriving Repr, BEq, Inhabited
 
+/-- A colour and/or texture, defined at robot level and referenced by name, or inline. -/
+structure Material where
+  name : String := ""
+  rgba? : Option (Float × Float × Float × Float) := none
+  texture? : Option String := none
+  deriving Repr, BEq, Inhabited
+
 structure Visual where
   name : Option String := none
   origin : Origin := {}
   geometry : Geometry := .unsupported "missing"
+  material? : Option Material := none
   deriving Repr, BEq, Inhabited
 
 structure Collision where
@@ -73,6 +81,11 @@ structure JointLimit where
   velocity? : Option Float := none
   deriving Repr, BEq, Inhabited
 
+structure JointDynamics where
+  damping : Float := 0.0
+  friction : Float := 0.0
+  deriving Repr, BEq, Inhabited
+
 structure Joint where
   name : String
   jointType : JointType
@@ -81,12 +94,16 @@ structure Joint where
   origin : Origin := {}
   axis : Vector3 := { x := 1.0, y := 0.0, z := 0.0 }
   limit? : Option JointLimit := none
+  dynamics? : Option JointDynamics := none
+  /-- The joint this one mimics, if any. -/
+  mimic? : Option String := none
   deriving Repr, BEq, Inhabited
 
 structure Robot where
   name : String
   links : Array Link := #[]
   joints : Array Joint := #[]
+  materials : Array Material := #[]
   deriving Repr, BEq, Inhabited
 
 def JointType.ofString : String → JointType
@@ -97,6 +114,11 @@ def JointType.ofString : String → JointType
   | "floating" => .floating
   | "planar" => .planar
   | raw => .unknown raw
+
+/-- A visual's colour: its own, else the robot-level material of that name. -/
+def Robot.visualColor? (robot : Robot) (v : Visual) : Option (Float × Float × Float × Float) :=
+  v.material?.bind fun m => m.rgba?.orElse fun _ =>
+    (robot.materials.find? (·.name == m.name)).bind (·.rgba?)
 
 def Robot.linkNames (robot : Robot) : Array String :=
   robot.links.map (fun link => link.name)

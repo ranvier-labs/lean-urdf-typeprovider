@@ -1,5 +1,6 @@
 import Lean
 import LeanUrdfTypeProvider.Runtime
+import LeanUrdfTypeProvider.Parse
 import LeanUrdfTypeProvider.XmlSyntax
 
 open Lean Elab Command
@@ -13,216 +14,6 @@ syntax (name := urdfInlineCmd)
 
 syntax (name := urdfFileCmd)
   "urdf_type_provider " str " as " ident : command
-
-private structure XmlAttr where
-  name : String
-  value : String
-  deriving Repr, Inhabited
-
-private structure XmlElement where
-  name : String
-  attrs : Array XmlAttr := #[]
-  children : Array XmlElement := #[]
-  deriving Repr, Inhabited
-
-private def attrValue? (elem : XmlElement) (name : String) : Option String :=
-  elem.attrs.findSome? fun attr => if attr.name == name then some attr.value else none
-
-private def requiredAttr (elem : XmlElement) (name : String) : Except String String :=
-  match attrValue? elem name with
-  | some value => pure value
-  | none => .error s!"<{elem.name}> is missing required attribute '{name}'"
-
-private def childElems (elem : XmlElement) (name : String) : Array XmlElement :=
-  elem.children.filter (fun child => child.name == name)
-
-private def firstChild? (elem : XmlElement) (name : String) : Option XmlElement :=
-  elem.children.find? (fun child => child.name == name)
-
-private def parseFloatLit? (s : String) : Option Float :=
-  let trimmed := s.trimAscii.toString
-  if trimmed.isEmpty then
-    none
-  else
-    let negative := trimmed.startsWith "-"
-    let body := if negative then (trimmed.drop 1).toString else trimmed
-    let unsigned? :=
-      match body.splitOn "." with
-      | [whole] =>
-          whole.toNat?.map Nat.toFloat
-      | [whole, frac] =>
-          match whole.toNat?, frac.toNat? with
-          | some w, some f =>
-              let denom : Float := (Nat.pow 10 frac.length).toFloat
-              some (w.toFloat + f.toFloat / denom)
-          | _, _ => none
-      | _ => none
-    unsigned?.map fun x => if negative then -x else x
-
-private def parseFloat (ctx raw : String) : Except String Float :=
-  match parseFloatLit? raw with
-  | some value => pure value
-  | none => .error s!"{ctx}: expected Float, got '{raw}'"
-
-private def fields (raw : String) : Array String :=
-  ((raw.splitOn " ").filter (fun part => !part.isEmpty)).toArray
-
-private def parseVector3 (ctx raw : String) : Except String Vector3 := do
-  let parts := fields raw
-  if parts.size != 3 then
-    .error s!"{ctx}: expected three floats, got '{raw}'"
-  else
-    pure {
-      x := ← parseFloat s!"{ctx}.x" parts[0]!
-      y := ← parseFloat s!"{ctx}.y" parts[1]!
-      z := ← parseFloat s!"{ctx}.z" parts[2]!
-    }
-
-private def parseOptionalVector3 (ctx : String) (raw? : Option String) : Except String Vector3 := do
-  match raw? with
-  | none => pure {}
-  | some raw => parseVector3 ctx raw
-
-private def parseOrigin (elem : Option XmlElement) : Except String Origin := do
-  match elem with
-  | none => pure {}
-  | some origin =>
-      if origin.name != "origin" then
-        .error s!"expected <origin>, got <{origin.name}>"
-      pure {
-        xyz := ← parseOptionalVector3 "origin.xyz" (attrValue? origin "xyz")
-        rpy := ← parseOptionalVector3 "origin.rpy" (attrValue? origin "rpy")
-      }
-
-private def parseGeometry (elem : XmlElement) : Except String Geometry := do
-  if elem.name != "geometry" then
-    .error s!"expected <geometry>, got <{elem.name}>"
-  match elem.children.toList with
-  | [child] =>
-      match child.name with
-      | "box" =>
-          pure (.box (← parseVector3 "box.size" (← requiredAttr child "size")))
-      | "cylinder" =>
-          pure (.cylinder
-            (← parseFloat "cylinder.radius" (← requiredAttr child "radius"))
-            (← parseFloat "cylinder.length" (← requiredAttr child "length")))
-      | "sphere" =>
-          pure (.sphere (← parseFloat "sphere.radius" (← requiredAttr child "radius")))
-      | "mesh" =>
-          let scale? ←
-            match attrValue? child "scale" with
-            | none => pure none
-            | some raw => some <$> parseVector3 "mesh.scale" raw
-          pure (.mesh (← requiredAttr child "filename") scale?)
-      | tag =>
-          pure (.unsupported tag)
-  | [] => .error "<geometry> requires exactly one child"
-  | _ => .error "<geometry> supports exactly one child in this provider"
-
-private def parseVisual (elem : XmlElement) : Except String Visual := do
-  let geometry ←
-    match firstChild? elem "geometry" with
-    | some geometry => parseGeometry geometry
-    | none => pure (.unsupported "missing")
-  pure {
-    name := attrValue? elem "name"
-    origin := ← parseOrigin (firstChild? elem "origin")
-    geometry := geometry
-  }
-
-private def parseCollision (elem : XmlElement) : Except String Collision := do
-  let geometry ←
-    match firstChild? elem "geometry" with
-    | some geometry => parseGeometry geometry
-    | none => pure (.unsupported "missing")
-  pure {
-    name := attrValue? elem "name"
-    origin := ← parseOrigin (firstChild? elem "origin")
-    geometry := geometry
-  }
-
-private def parseInertia (elem : XmlElement) : Except String Inertia := do
-  pure {
-    ixx := ← parseFloat "inertia.ixx" (← requiredAttr elem "ixx")
-    ixy := ← parseFloat "inertia.ixy" (← requiredAttr elem "ixy")
-    ixz := ← parseFloat "inertia.ixz" (← requiredAttr elem "ixz")
-    iyy := ← parseFloat "inertia.iyy" (← requiredAttr elem "iyy")
-    iyz := ← parseFloat "inertia.iyz" (← requiredAttr elem "iyz")
-    izz := ← parseFloat "inertia.izz" (← requiredAttr elem "izz")
-  }
-
-private def parseInertial (elem : XmlElement) : Except String Inertial := do
-  let mass ←
-    match firstChild? elem "mass" with
-    | some mass => parseFloat "mass.value" (← requiredAttr mass "value")
-    | none => pure 0.0
-  let inertia ←
-    match firstChild? elem "inertia" with
-    | some inertia => parseInertia inertia
-    | none => pure {}
-  pure {
-    origin := ← parseOrigin (firstChild? elem "origin")
-    mass := mass
-    inertia := inertia
-  }
-
-private def parseLink (elem : XmlElement) : Except String Link := do
-  let inertial? ←
-    match firstChild? elem "inertial" with
-    | none => pure none
-    | some inertial => some <$> parseInertial inertial
-  pure {
-    name := ← requiredAttr elem "name"
-    inertial? := inertial?
-    visuals := ← (childElems elem "visual").mapM parseVisual
-    collisions := ← (childElems elem "collision").mapM parseCollision
-  }
-
-private def parseLimit (elem : XmlElement) : Except String JointLimit := do
-  let parse? (field : String) : Except String (Option Float) :=
-    match attrValue? elem field with
-    | none => pure none
-    | some raw => some <$> parseFloat s!"limit.{field}" raw
-  pure {
-    lower? := ← parse? "lower"
-    upper? := ← parse? "upper"
-    effort? := ← parse? "effort"
-    velocity? := ← parse? "velocity"
-  }
-
-private def parseJoint (elem : XmlElement) : Except String Joint := do
-  let parentElem ←
-    match firstChild? elem "parent" with
-    | some parent => pure parent
-    | none => .error s!"joint '{(attrValue? elem "name").getD "?"}' is missing <parent>"
-  let childElem ←
-    match firstChild? elem "child" with
-    | some child => pure child
-    | none => .error s!"joint '{(attrValue? elem "name").getD "?"}' is missing <child>"
-  let limit? ←
-    match firstChild? elem "limit" with
-    | none => pure none
-    | some limit => some <$> parseLimit limit
-  pure {
-    name := ← requiredAttr elem "name"
-    jointType := JointType.ofString (← requiredAttr elem "type")
-    parent := ← requiredAttr parentElem "link"
-    child := ← requiredAttr childElem "link"
-    origin := ← parseOrigin (firstChild? elem "origin")
-    axis := ← parseOptionalVector3 "axis.xyz" ((firstChild? elem "axis").bind (attrValue? · "xyz"))
-    limit? := limit?
-  }
-
-private def parseRobot (elem : XmlElement) : Except String Robot := do
-  if elem.name != "robot" then
-    .error s!"expected root <robot>, got <{elem.name}>"
-  let robot : Robot := {
-    name := ← requiredAttr elem "name"
-    links := ← (childElems elem "link").mapM parseLink
-    joints := ← (childElems elem "joint").mapM parseJoint
-  }
-  robot.validateTree
-  pure robot
 
 private partial def stxText (stx : Syntax) : String :=
   match stx with
@@ -309,26 +100,31 @@ private def optionStringExpr : Option String → String
   | none => "none"
   | some value => s!"some {leanStringLit value}"
 
+/-- A float as Lean source, bit-exact: `toString` keeps six decimals, which turns a
+`1e-7` inertia into zero. -/
+private def floatExpr (value : Float) : String :=
+  s!"(Float.ofBits {value.toBits})"
+
 private def optionFloatExpr : Option Float → String
   | none => "none"
-  | some value => s!"(some ({value} : Float) : Option Float)"
+  | some value => s!"(some {floatExpr value} : Option Float)"
 
 private def typedRecordExpr (typeName fields : String) : String :=
   "({ " ++ fields ++ " } : _root_.LeanUrdfTypeProvider." ++ typeName ++ ")"
 
 private def vector3Expr (v : Vector3) : String :=
-  typedRecordExpr "Vector3" s!"x := {v.x}, y := {v.y}, z := {v.z}"
+  typedRecordExpr "Vector3" s!"x := {floatExpr v.x}, y := {floatExpr v.y}, z := {floatExpr v.z}"
 
 private def originExpr (o : Origin) : String :=
   typedRecordExpr "Origin" s!"xyz := {vector3Expr o.xyz}, rpy := {vector3Expr o.rpy}"
 
 private def inertiaExpr (i : Inertia) : String :=
   typedRecordExpr "Inertia"
-    s!"ixx := {i.ixx}, ixy := {i.ixy}, ixz := {i.ixz}, iyy := {i.iyy}, iyz := {i.iyz}, izz := {i.izz}"
+    s!"ixx := {floatExpr i.ixx}, ixy := {floatExpr i.ixy}, ixz := {floatExpr i.ixz}, iyy := {floatExpr i.iyy}, iyz := {floatExpr i.iyz}, izz := {floatExpr i.izz}"
 
 private def inertialExpr (i : Inertial) : String :=
   typedRecordExpr "Inertial"
-    s!"origin := {originExpr i.origin}, mass := {i.mass}, inertia := {inertiaExpr i.inertia}"
+    s!"origin := {originExpr i.origin}, mass := {floatExpr i.mass}, inertia := {inertiaExpr i.inertia}"
 
 private def optionInertialExpr : Option Inertial → String
   | none => "none"
@@ -345,15 +141,26 @@ private def jointTypeExpr : JointType → String
 
 private def geometryExpr : Geometry → String
   | .box size => s!"_root_.LeanUrdfTypeProvider.Geometry.box {vector3Expr size}"
-  | .cylinder radius length => s!"_root_.LeanUrdfTypeProvider.Geometry.cylinder {radius} {length}"
-  | .sphere radius => s!"_root_.LeanUrdfTypeProvider.Geometry.sphere {radius}"
+  | .cylinder radius length => s!"_root_.LeanUrdfTypeProvider.Geometry.cylinder {floatExpr radius} {floatExpr length}"
+  | .sphere radius => s!"_root_.LeanUrdfTypeProvider.Geometry.sphere {floatExpr radius}"
   | .mesh filename none => s!"_root_.LeanUrdfTypeProvider.Geometry.mesh {leanStringLit filename}"
   | .mesh filename (some scale) => s!"_root_.LeanUrdfTypeProvider.Geometry.mesh {leanStringLit filename} (some {vector3Expr scale} : Option _root_.LeanUrdfTypeProvider.Vector3)"
   | .unsupported tag => s!"_root_.LeanUrdfTypeProvider.Geometry.unsupported {leanStringLit tag}"
 
+private def materialExpr (m : Material) : String :=
+  let rgba := match m.rgba? with
+    | none => "none"
+    | some (r, g, b, a) => s!"(some ({floatExpr r}, {floatExpr g}, {floatExpr b}, {floatExpr a}) : Option (Float × Float × Float × Float))"
+  typedRecordExpr "Material"
+    s!"name := {leanStringLit m.name}, rgba? := {rgba}, texture? := {optionStringExpr m.texture?}"
+
+private def optionMaterialExpr : Option Material → String
+  | none => "none"
+  | some m => s!"(some {materialExpr m} : Option _root_.LeanUrdfTypeProvider.Material)"
+
 private def visualExpr (v : Visual) : String :=
   typedRecordExpr "Visual"
-    s!"name := {optionStringExpr v.name}, origin := {originExpr v.origin}, geometry := {geometryExpr v.geometry}"
+    s!"name := {optionStringExpr v.name}, origin := {originExpr v.origin}, geometry := {geometryExpr v.geometry}, material? := {optionMaterialExpr v.material?}"
 
 private def collisionExpr (c : Collision) : String :=
   typedRecordExpr "Collision"
@@ -374,13 +181,17 @@ private def optionLimitExpr : Option JointLimit → String
   | none => "none"
   | some limit => s!"(some {jointLimitExpr limit} : Option _root_.LeanUrdfTypeProvider.JointLimit)"
 
+private def dynamicsExpr : Option JointDynamics → String
+  | none => "none"
+  | some d => s!"(some {typedRecordExpr "JointDynamics" s!"damping := {floatExpr d.damping}, friction := {floatExpr d.friction}"} : Option _root_.LeanUrdfTypeProvider.JointDynamics)"
+
 private def jointExpr (joint : Joint) : String :=
   typedRecordExpr "Joint"
-    s!"name := {leanStringLit joint.name}, jointType := {jointTypeExpr joint.jointType}, parent := {leanStringLit joint.parent}, child := {leanStringLit joint.child}, origin := {originExpr joint.origin}, axis := {vector3Expr joint.axis}, limit? := {optionLimitExpr joint.limit?}"
+    s!"name := {leanStringLit joint.name}, jointType := {jointTypeExpr joint.jointType}, parent := {leanStringLit joint.parent}, child := {leanStringLit joint.child}, origin := {originExpr joint.origin}, axis := {vector3Expr joint.axis}, limit? := {optionLimitExpr joint.limit?}, dynamics? := {dynamicsExpr joint.dynamics?}, mimic? := {optionStringExpr joint.mimic?}"
 
 private def robotExpr (robot : Robot) : String :=
   typedRecordExpr "Robot"
-    s!"name := {leanStringLit robot.name}, links := {arrayExpr (robot.links.map linkExpr)}, joints := {arrayExpr (robot.joints.map jointExpr)}"
+    s!"name := {leanStringLit robot.name}, links := {arrayExpr (robot.links.map linkExpr)}, joints := {arrayExpr (robot.joints.map jointExpr)}, materials := {arrayExpr (robot.materials.map materialExpr)}"
 
 private def parseGeneratedCommand (source : String) : CommandElabM Syntax := do
   let env ← getEnv
@@ -442,10 +253,14 @@ def elabUrdfInline : CommandElab := fun stx => do
 def elabUrdfFile : CommandElab := fun stx => do
   match stx with
   | `(urdf_type_provider $path:str as $declName:ident) =>
+      -- Read with the run-time XML reader, which accepts what real URDF files contain
+      -- (comments, exponents, namespaced attributes); the inline form keeps the grammar.
       let sourcePath : System.FilePath := ⟨path.getString⟩
-      let source ← IO.FS.readFile sourcePath
-      let generated := s!"urdf_model {declName.getId} :=\n{source}\n"
-      elabCommand (← parseGeneratedCommand generated)
+      let robot ← match Robot.parse (← IO.FS.readFile sourcePath) with
+        | .ok robot => pure robot
+        | .error msg => throwError "{sourcePath}: {msg}"
+      for command in renderProviderCommands declName.getId robot do
+        elabGeneratedCommand command
   | _ => throwUnsupportedSyntax
 
 end LeanUrdfTypeProvider

@@ -1,2 +1,4 @@
 import LeanUrdfTypeProvider.Runtime
+import LeanUrdfTypeProvider.Xml
+import LeanUrdfTypeProvider.Parse
 import LeanUrdfTypeProvider.TypeProvider
