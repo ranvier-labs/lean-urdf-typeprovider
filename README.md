@@ -16,6 +16,19 @@ urdf_type_provider "path/to/robot.urdf" as RobotModel
 #check RobotModel.jointNames
 ```
 
+The same robots can be read at run time, from any URDF file:
+
+```lean
+let robot ← LeanUrdfTypeProvider.Robot.load "go2_description.urdf"
+-- or Robot.parse : String → Except String Robot
+```
+
+The run-time XML reader (`LeanUrdfTypeProvider.Xml`) accepts what real descriptions
+contain: comments, the XML declaration, `xmlns:` attributes, entities, single-quoted values
+and exponents such as `3.12E-05`. `urdf_type_provider "file"` reads files with it too; the
+inline `urdf_model` form keeps the syntax-category grammar. Generated declarations carry
+floats bit-exactly. It reads the Unitree Go2, H1 and G1 descriptions of `unitree_ros`.
+
 Supported URDF subset:
 
 - `robot`, `link`, `joint`
@@ -23,6 +36,7 @@ Supported URDF subset:
 - `inertial`, `mass`, `inertia`
 - `visual`, `collision`, `geometry`
 - `box`, `cylinder`, `sphere`, `mesh`
+- `material` (robot level and inline, `color`, `texture`), joint `dynamics` and `mimic`
 
 The file parser accepts XML declarations, nested elements, empty element tags,
 and string-valued attributes. It intentionally rejects mismatched tags and
