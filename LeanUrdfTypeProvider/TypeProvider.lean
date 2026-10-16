@@ -189,9 +189,45 @@ private def jointExpr (joint : Joint) : String :=
   typedRecordExpr "Joint"
     s!"name := {leanStringLit joint.name}, jointType := {jointTypeExpr joint.jointType}, parent := {leanStringLit joint.parent}, child := {leanStringLit joint.child}, origin := {originExpr joint.origin}, axis := {vector3Expr joint.axis}, limit? := {optionLimitExpr joint.limit?}, dynamics? := {dynamicsExpr joint.dynamics?}, mimic? := {optionStringExpr joint.mimic?}"
 
+private def optionExpr (typeName : String) (f : α → String) : Option α → String
+  | none => "none"
+  | some x => s!"(some {f x} : Option _root_.LeanUrdfTypeProvider.{typeName})"
+
+private def sensorKindExpr : SensorKind → String
+  | .camera => "_root_.LeanUrdfTypeProvider.SensorKind.camera"
+  | .depthCamera => "_root_.LeanUrdfTypeProvider.SensorKind.depthCamera"
+  | .rgbdCamera => "_root_.LeanUrdfTypeProvider.SensorKind.rgbdCamera"
+  | .lidar => "_root_.LeanUrdfTypeProvider.SensorKind.lidar"
+  | .imu => "_root_.LeanUrdfTypeProvider.SensorKind.imu"
+  | .contact => "_root_.LeanUrdfTypeProvider.SensorKind.contact"
+  | .other raw => s!"_root_.LeanUrdfTypeProvider.SensorKind.other {leanStringLit raw}"
+
+private def noiseExpr (n : SensorNoise) : String :=
+  typedRecordExpr "SensorNoise" s!"mean := {floatExpr n.mean}, stddev := {floatExpr n.stddev}"
+
+private def cameraExpr (c : CameraSpec) : String :=
+  typedRecordExpr "CameraSpec"
+    s!"width := {c.width}, height := {c.height}, hfov := {floatExpr c.hfov}, format := {leanStringLit c.format}, near := {floatExpr c.near}, far := {floatExpr c.far}, noise? := {optionExpr "SensorNoise" noiseExpr c.noise?}"
+
+private def rayAxisExpr (a : RayAxis) : String :=
+  typedRecordExpr "RayAxis"
+    s!"samples := {a.samples}, resolution := {floatExpr a.resolution}, minAngle := {floatExpr a.minAngle}, maxAngle := {floatExpr a.maxAngle}"
+
+private def rayExpr (r : RaySpec) : String :=
+  typedRecordExpr "RaySpec"
+    s!"horizontal := {rayAxisExpr r.horizontal}, vertical := {rayAxisExpr r.vertical}, minRange := {floatExpr r.minRange}, maxRange := {floatExpr r.maxRange}, rangeResolution := {floatExpr r.rangeResolution}, noise? := {optionExpr "SensorNoise" noiseExpr r.noise?}"
+
+private def imuExpr (i : ImuSpec) : String :=
+  typedRecordExpr "ImuSpec"
+    s!"gyroNoise? := {optionExpr "SensorNoise" noiseExpr i.gyroNoise?}, accelNoise? := {optionExpr "SensorNoise" noiseExpr i.accelNoise?}"
+
+private def sensorExpr (s : Sensor) : String :=
+  typedRecordExpr "Sensor"
+    s!"name := {leanStringLit s.name}, kind := {sensorKindExpr s.kind}, rawType := {leanStringLit s.rawType}, parent := {leanStringLit s.parent}, origin := {originExpr s.origin}, updateRate := {floatExpr s.updateRate}, camera? := {optionExpr "CameraSpec" cameraExpr s.camera?}, ray? := {optionExpr "RaySpec" rayExpr s.ray?}, imu? := {optionExpr "ImuSpec" imuExpr s.imu?}, collisions := ({arrayExpr (s.collisions.map leanStringLit)} : Array String)"
+
 private def robotExpr (robot : Robot) : String :=
   typedRecordExpr "Robot"
-    s!"name := {leanStringLit robot.name}, links := {arrayExpr (robot.links.map linkExpr)}, joints := {arrayExpr (robot.joints.map jointExpr)}, materials := {arrayExpr (robot.materials.map materialExpr)}"
+    s!"name := {leanStringLit robot.name}, links := {arrayExpr (robot.links.map linkExpr)}, joints := {arrayExpr (robot.joints.map jointExpr)}, materials := {arrayExpr (robot.materials.map materialExpr)}, sensors := {arrayExpr (robot.sensors.map sensorExpr)}"
 
 private def parseGeneratedCommand (source : String) : CommandElabM Syntax := do
   let env ← getEnv
@@ -230,7 +266,8 @@ private def renderProviderCommands (nsName : Name) (robot : Robot) : Array Strin
     s!"abbrev JointCount : Nat := {robot.joints.size}",
     s!"def linkNames : Array String := {arrayExpr (linkNames.map leanStringLit)}",
     s!"def jointNames : Array String := {arrayExpr (jointNames.map leanStringLit)}",
-    s!"def rootLinks : Array String := {arrayExpr (rootLinks.map leanStringLit)}"
+    s!"def rootLinks : Array String := {arrayExpr (rootLinks.map leanStringLit)}",
+    s!"def sensorNames : Array String := {arrayExpr (robot.sensors.map (leanStringLit ·.name))}"
   ] ++ linkDecls ++ jointDecls ++ #["end " ++ nsName.toString]
 
 private def elaborateRobotSyntax (declName : Ident) (doc : Syntax) : CommandElabM Unit := do

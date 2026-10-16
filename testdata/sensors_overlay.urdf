@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<!-- An overlay: sensors only, attached to links of another file (two_link.urdf). -->
+<robot name="two_link_sensors">
+  <gazebo reference="forearm_link">
+    <sensor name="tip_camera" type="camera">
+      <update_rate>15</update_rate>
+      <pose>0 0 0.5 0 1.5708 0</pose>
+      <camera><horizontal_fov>1.2</horizontal_fov><image><width>96</width><height>72</height></image></camera>
+    </sensor>
+  </gazebo>
+  <sensor name="base_imu" type="imu" update_rate="200">
+    <parent link="base_link"/>
+  </sensor>
+</robot>

@@ -99,11 +99,97 @@ structure Joint where
   mimic? : Option String := none
   deriving Repr, BEq, Inhabited
 
+/-- What a sensor measures. `camera`: an image (`depth`: its depth image too, or only it);
+`lidar`: ranges along rays; `imu`; `contact`. Gazebo's types map onto these: `camera`,
+`depth`/`depthcamera`/`rgbd_camera`, `ray`/`gpu_ray`/`lidar`/`gpu_lidar`, `imu`, `contact`. -/
+inductive SensorKind where
+  | camera
+  | depthCamera
+  | rgbdCamera
+  | lidar
+  | imu
+  | contact
+  | other (raw : String)
+  deriving Repr, BEq, Inhabited
+
+def SensorKind.ofString : String → SensorKind
+  | "camera" | "multicamera" | "wideanglecamera" => .camera
+  | "depth" | "depthcamera" | "depth_camera" => .depthCamera
+  | "rgbd" | "rgbd_camera" | "rgbdcamera" => .rgbdCamera
+  | "ray" | "gpu_ray" | "lidar" | "gpu_lidar" => .lidar
+  | "imu" => .imu
+  | "contact" => .contact
+  | raw => .other raw
+
+/-- Additive Gaussian noise (Gazebo's `<noise type="gaussian">`). -/
+structure SensorNoise where
+  mean : Float := 0.0
+  stddev : Float := 0.0
+  deriving Repr, BEq, Inhabited
+
+/-- A pinhole camera: image size, horizontal field of view (rad), pixel format, clip planes. -/
+structure CameraSpec where
+  width : Nat := 320
+  height : Nat := 240
+  hfov : Float := 1.047
+  format : String := ""
+  near : Float := 0.05
+  far : Float := 100.0
+  noise? : Option SensorNoise := none
+  deriving Repr, BEq, Inhabited
+
+/-- One scan axis of a ray sensor: `samples` rays from `minAngle` to `maxAngle` (rad). -/
+structure RayAxis where
+  samples : Nat := 1
+  resolution : Float := 1.0
+  minAngle : Float := 0.0
+  maxAngle : Float := 0.0
+  deriving Repr, BEq, Inhabited
+
+/-- A ray sensor (lidar): horizontal and vertical scan, range limits (m). -/
+structure RaySpec where
+  horizontal : RayAxis := {}
+  vertical : RayAxis := {}
+  minRange : Float := 0.0
+  maxRange : Float := 0.0
+  rangeResolution : Float := 0.0
+  noise? : Option SensorNoise := none
+  deriving Repr, BEq, Inhabited
+
+/-- IMU noise: angular velocity (rad/s) and linear acceleration (m/s²). -/
+structure ImuSpec where
+  gyroNoise? : Option SensorNoise := none
+  accelNoise? : Option SensorNoise := none
+  deriving Repr, BEq, Inhabited
+
+/--
+A sensor attached to a link: URDF's `<sensor>` (urdfdom: `<parent link>`, `<origin>`,
+`<camera><image …/></camera>`, `<ray><horizontal …/><vertical …/></ray>`) or Gazebo's
+`<gazebo reference="link"><sensor type=…>` (`<pose>`, `<update_rate>`, `<camera>`, `<ray>`
+or `<lidar>`, `<imu>`, `<contact>`). `origin` is the sensor frame in the parent link's frame.
+-/
+structure Sensor where
+  name : String
+  kind : SensorKind
+  /-- The type as written (`type` attribute, or `camera`/`ray` from the child element). -/
+  rawType : String := ""
+  parent : String
+  origin : Origin := {}
+  /-- Updates per second (0: as often as possible). -/
+  updateRate : Float := 0.0
+  camera? : Option CameraSpec := none
+  ray? : Option RaySpec := none
+  imu? : Option ImuSpec := none
+  /-- Contact sensors: the collision elements they report (Gazebo `<contact><collision>`). -/
+  collisions : Array String := #[]
+  deriving Repr, BEq, Inhabited
+
 structure Robot where
   name : String
   links : Array Link := #[]
   joints : Array Joint := #[]
   materials : Array Material := #[]
+  sensors : Array Sensor := #[]
   deriving Repr, BEq, Inhabited
 
 def JointType.ofString : String → JointType
@@ -138,12 +224,18 @@ def Robot.rootLinks (robot : Robot) : Array String :=
       if robot.joints.any (fun joint => joint.child == link.name) then acc else acc.push link.name)
     #[]
 
+def Robot.findSensor? (robot : Robot) (name : String) : Option Sensor :=
+  robot.sensors.find? (fun sensor => sensor.name == name)
+
 def Robot.validateTree (robot : Robot) : Except String Unit := do
   for joint in robot.joints do
     if (robot.findLink? joint.parent).isNone then
       .error s!"joint '{joint.name}' references missing parent link '{joint.parent}'"
     if (robot.findLink? joint.child).isNone then
       .error s!"joint '{joint.name}' references missing child link '{joint.child}'"
+  for sensor in robot.sensors do
+    if (robot.findLink? sensor.parent).isNone then
+      .error s!"sensor '{sensor.name}' references missing parent link '{sensor.parent}'"
   let roots := robot.rootLinks
   if roots.size == 0 then
     .error "robot has no root link"

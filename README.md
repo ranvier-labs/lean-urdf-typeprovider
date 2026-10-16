@@ -37,6 +37,21 @@ Supported URDF subset:
 - `visual`, `collision`, `geometry`
 - `box`, `cylinder`, `sphere`, `mesh`
 - `material` (robot level and inline, `color`, `texture`), joint `dynamics` and `mimic`
+- sensors (`Robot.sensors`, `LeanUrdfTypeProvider.Sensor`), in both spellings: URDF's own
+  `<sensor name update_rate>` with `<parent link>`, `<origin>`,
+  `<camera><image width height hfov format near far/></camera>` and
+  `<ray><horizontal …/><vertical …/></ray>` (urdfdom), and Gazebo's
+  `<gazebo reference="link"><sensor type="camera|depth|rgbd_camera|ray|gpu_ray|gpu_lidar|imu|contact">`
+  with `<update_rate>`, `<pose>`, `<camera>`, `<ray>`/`<lidar>` (`<scan>`, `<range>`),
+  `<imu>`, `<contact>` and Gaussian `<noise>`
+
+Sensors often live apart from a robot's description. An overlay is a `<robot>` file with
+only sensors (or other parts) that name the base file's links:
+
+```lean
+let robot ← Robot.loadWithOverlays "go2_description.urdf" #["go2.sensors.urdf"]
+-- or Robot.parseOverlay, Robot.merge (an overlay sensor replaces a base one of its name)
+```
 
 The file parser accepts XML declarations, nested elements, empty element tags,
 and string-valued attributes. It intentionally rejects mismatched tags and

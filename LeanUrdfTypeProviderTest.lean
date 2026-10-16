@@ -1,2 +1,3 @@
 import LeanUrdfTypeProviderTest.Basic
 import LeanUrdfTypeProviderTest.Runtime
+import LeanUrdfTypeProviderTest.Sensors

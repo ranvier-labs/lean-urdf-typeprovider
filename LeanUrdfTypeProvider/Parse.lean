@@ -220,15 +220,161 @@ def parseJoint (elem : XmlElement) : Except String Joint := do
     mimic? := (firstChild? elem "mimic").bind (·.attr? "joint")
   }
 
-def parseRobot (elem : XmlElement) : Except String Robot := do
+/-! ## Sensors
+
+Both spellings in use: URDF's own `<sensor>` (urdfdom; values in attributes) and Gazebo's
+SDF sensors inside `<gazebo reference="link">` (values in child elements' text). A value is
+read from an attribute if present, else from the text of a child element of that name. -/
+
+/-- A number from the attribute `name`, else from the text of the child `name`. -/
+def numberOf? (ctx : String) (elem : XmlElement) (name : String) : Except String (Option Float) :=
+  match (elem.attr? name).orElse fun _ => elem.textAt? [name] with
+  | none => pure none
+  | some raw => some <$> parseFloat s!"{ctx}.{name}" raw
+
+def numberOr (ctx : String) (elem : XmlElement) (name : String) (d : Float) : Except String Float :=
+  return (← numberOf? ctx elem name).getD d
+
+def natOr (ctx : String) (elem : XmlElement) (name : String) (d : Nat) : Except String Nat := do
+  match ← numberOf? ctx elem name with
+  | none => pure d
+  | some x =>
+    if x < 0 || x != x.round then .error s!"{ctx}.{name}: expected a natural number, got {x}"
+    else pure x.toUInt64.toNat
+
+/-- Gaussian noise: `<noise type="gaussian"><mean/><stddev/></noise>` (or `mean`/`stddev`
+attributes). Noise of other types is read for its mean and standard deviation alike. -/
+def parseNoise (elem : XmlElement) : Except String SensorNoise := do
+  pure { mean := ← numberOr "noise" elem "mean" 0, stddev := ← numberOr "noise" elem "stddev" 0 }
+
+def parseNoiseIn? (elem : XmlElement) : Except String (Option SensorNoise) :=
+  (elem.child? "noise").mapM parseNoise
+
+/-- A camera: urdfdom's `<camera><image width height hfov format near far/></camera>` or
+SDF's `<camera><horizontal_fov/><image><width/><height/><format/></image><clip><near/><far/></clip></camera>`. -/
+def parseCamera (elem : XmlElement) : Except String CameraSpec := do
+  let d : CameraSpec := {}
+  let image := (elem.child? "image").getD {name := "image"}
+  let clip := (elem.child? "clip").getD {name := "clip"}
+  let hfov ← match ← numberOf? "camera.image" image "hfov" with
+    | some h => pure h
+    | none => numberOr "camera" elem "horizontal_fov" d.hfov
+  pure {
+    width := ← natOr "camera.image" image "width" d.width
+    height := ← natOr "camera.image" image "height" d.height
+    hfov
+    format := ((image.attr? "format").orElse fun _ => image.textAt? ["format"]).getD d.format
+    near := ← match ← numberOf? "camera.image" image "near" with
+      | some n => pure n | none => numberOr "camera.clip" clip "near" d.near
+    far := ← match ← numberOf? "camera.image" image "far" with
+      | some f => pure f | none => numberOr "camera.clip" clip "far" d.far
+    noise? := ← parseNoiseIn? elem
+  }
+
+def parseRayAxis (ctx : String) (elem : XmlElement) : Except String RayAxis := do
+  pure {
+    samples := ← natOr ctx elem "samples" 1
+    resolution := ← numberOr ctx elem "resolution" 1
+    minAngle := ← numberOr ctx elem "min_angle" 0
+    maxAngle := ← numberOr ctx elem "max_angle" 0
+  }
+
+/-- A ray sensor: urdfdom's `<ray><horizontal …/><vertical …/></ray>` or SDF's
+`<ray>`/`<lidar>` with `<scan><horizontal/><vertical/></scan>`, `<range><min/><max/>
+<resolution/></range>` and `<noise>`. -/
+def parseRay (elem : XmlElement) : Except String RaySpec := do
+  let scan := (elem.child? "scan").getD elem
+  let range := (elem.child? "range").getD {name := "range"}
+  let axis (n : String) : Except String RayAxis :=
+    match scan.child? n with
+    | some a => parseRayAxis s!"ray.{n}" a
+    | none => pure {}
+  pure {
+    horizontal := ← axis "horizontal"
+    vertical := ← axis "vertical"
+    minRange := ← numberOr "ray.range" range "min" 0
+    maxRange := ← numberOr "ray.range" range "max" 0
+    rangeResolution := ← numberOr "ray.range" range "resolution" 0
+    noise? := ← parseNoiseIn? elem
+  }
+
+/-- The noise of the first axis (`<x>`) that has one, under `<angular_velocity>` or
+`<linear_acceleration>`. -/
+def axisNoise? (elem : XmlElement) (group : String) : Except String (Option SensorNoise) := do
+  let some g := elem.child? group | return none
+  for a in ["x", "y", "z"] do
+    if let some n := (g.child? a).bind (·.child? "noise") then return some (← parseNoise n)
+  parseNoiseIn? g
+
+def parseImu (elem : XmlElement) : Except String ImuSpec := do
+  pure { gyroNoise? := ← axisNoise? elem "angular_velocity", accelNoise? := ← axisNoise? elem "linear_acceleration" }
+
+/-- SDF's `<pose>x y z roll pitch yaw</pose>`. -/
+def parsePose (raw : String) : Except String Origin := do
+  let parts := fields raw
+  if parts.size != 6 then .error s!"pose: expected six floats, got '{raw}'"
+  let v ← parts.mapM (parseFloat "pose")
+  pure { xyz := ⟨v[0]!, v[1]!, v[2]!⟩, rpy := ⟨v[3]!, v[4]!, v[5]!⟩ }
+
+/-- A `<sensor>` element. `reference`: the link of an enclosing `<gazebo reference>` block
+(else `<parent link>` names it). -/
+def parseSensor (elem : XmlElement) (reference : Option String := none) : Except String Sensor := do
+  let name := (elem.attr? "name").getD ""
+  let ctx := s!"sensor '{name}'"
+  let parent ← match reference, (elem.child? "parent").bind (·.attr? "link") with
+    | _, some p => pure p
+    | some r, none => pure r
+    | none, none => .error s!"{ctx}: no <parent link> and not in a <gazebo reference> block"
+  let camera := elem.child? "camera"
+  let ray := (elem.child? "ray").orElse fun _ => elem.child? "lidar"
+  let rawType := (elem.attr? "type").getD
+    (if camera.isSome then "camera" else if ray.isSome then "ray" else "")
+  if rawType.isEmpty then .error s!"{ctx}: no type, <camera> or <ray>"
+  let origin ← match elem.child? "origin", elem.textAt? ["pose"] with
+    | some o, _ => parseOrigin (some o)
+    | none, some p => parsePose p
+    | none, none => pure {}
+  let rate ← match elem.attr? "update_rate" with
+    | some r => parseFloat s!"{ctx}.update_rate" r
+    | none => numberOr ctx elem "update_rate" 0
+  pure {
+    name, parent, origin, rawType
+    kind := SensorKind.ofString rawType
+    updateRate := rate
+    camera? := ← camera.mapM fun c => do
+      -- A depth camera's own noise or clip may sit under <depth_camera>; the image is shared.
+      parseCamera c
+    ray? := ← ray.mapM parseRay
+    imu? := ← (elem.child? "imu").mapM parseImu
+    collisions := ((elem.child? "contact").map fun c => (c.childrenNamed "collision").map (·.text)).getD #[]
+  }
+
+/-- Every sensor of a `<robot>`: its `<sensor>` children and the `<sensor>`s of its
+`<gazebo reference="link">` blocks. -/
+def parseSensors (elem : XmlElement) : Except String (Array Sensor) := do
+  let own ← (childElems elem "sensor").mapM (parseSensor ·)
+  let mut gz := #[]
+  for g in childElems elem "gazebo" do
+    for sensor in childElems g "sensor" do
+      gz := gz.push (← parseSensor sensor (g.attr? "reference"))
+  return own ++ gz
+
+/-- A `<robot>`'s parts without checking that they form a tree (an overlay may hold only
+sensors that refer to links of another file). -/
+def parseRobotParts (elem : XmlElement) : Except String Robot := do
   if elem.name != "robot" then
     .error s!"expected root <robot>, got <{elem.name}>"
-  let robot : Robot := {
-    name := ← requiredAttr elem "name"
+  pure {
+    name := (elem.attr? "name").getD ""
     links := ← (childElems elem "link").mapM parseLink
     joints := ← (childElems elem "joint").mapM parseJoint
     materials := ← (childElems elem "material").mapM parseMaterial
+    sensors := ← parseSensors elem
   }
+
+def parseRobot (elem : XmlElement) : Except String Robot := do
+  let _ ← requiredAttr elem "name"
+  let robot ← parseRobotParts elem
   robot.validateTree
   pure robot
 
@@ -241,5 +387,32 @@ def Robot.load (path : System.FilePath) : IO Robot := do
   match Robot.parse (← IO.FS.readFile path) with
   | .ok robot => pure robot
   | .error msg => throw (IO.userError s!"{path}: {msg}")
+
+/-- An overlay: a `<robot>` whose links, joints, materials and sensors are added to another
+robot's (typically only `<sensor>`s and `<gazebo>` sensor blocks naming its links). -/
+def Robot.parseOverlay (source : String) : Except String Robot := do
+  parseRobotParts (← Xml.parse source)
+
+/-- `overlay`'s parts added to `base`'s; an overlay sensor replaces a base sensor of the same
+name. Checked as a tree, so overlay sensors must name links of either. -/
+def Robot.merge (base overlay : Robot) : Except String Robot := do
+  let replaced := base.sensors.filter fun s => !overlay.sensors.any (·.name == s.name)
+  let robot : Robot := { base with
+    links := base.links ++ overlay.links, joints := base.joints ++ overlay.joints,
+    materials := base.materials ++ overlay.materials, sensors := replaced ++ overlay.sensors }
+  robot.validateTree
+  pure robot
+
+/-- A robot from a URDF file with overlay files merged in order (`Robot.merge`). -/
+def Robot.loadWithOverlays (path : System.FilePath) (overlays : Array System.FilePath) : IO Robot := do
+  let mut robot ← Robot.load path
+  for o in overlays do
+    let overlay ← match Robot.parseOverlay (← IO.FS.readFile o) with
+      | .ok r => pure r
+      | .error msg => throw (IO.userError s!"{o}: {msg}")
+    robot ← match robot.merge overlay with
+      | .ok r => pure r
+      | .error msg => throw (IO.userError s!"{o} on {path}: {msg}")
+  return robot
 
 end LeanUrdfTypeProvider

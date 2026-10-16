@@ -3,8 +3,9 @@
 
 A small reader for the XML that robot descriptions use: elements, attributes in single or
 double quotes, empty-element tags, the XML declaration and other processing instructions,
-comments, `<!DOCTYPE …>`, CDATA and character data (skipped), and the five predefined
-entities plus numeric character references in attribute values.
+comments, `<!DOCTYPE …>`, CDATA, character data (an element's text, trimmed: Gazebo's
+`<update_rate>30</update_rate>`), and the five predefined entities plus numeric character
+references in attribute values and text.
 
 Unlike the syntax-category grammar in `XmlSyntax`, it reads any file, including the
 comments, hyphenated names and namespaced attributes (`xmlns:xacro`) of real URDFs.
@@ -21,6 +22,8 @@ structure XmlElement where
   name : String
   attrs : Array XmlAttr := #[]
   children : Array XmlElement := #[]
+  /-- The element's character data (CDATA included), trimmed. -/
+  text : String := ""
   deriving Repr, Inhabited
 
 namespace XmlElement
@@ -38,6 +41,15 @@ def childrenNamed (elem : XmlElement) (name : String) : Array XmlElement :=
 
 def child? (elem : XmlElement) (name : String) : Option XmlElement :=
   elem.children.find? (·.name == name)
+
+/-- The element at a path of child names (`elem.path? ["clip", "near"]`). -/
+def path? (elem : XmlElement) : List String → Option XmlElement
+  | [] => some elem
+  | n :: rest => (elem.child? n).bind (·.path? rest)
+
+/-- The text of the element at a path, if present and nonempty. -/
+def textAt? (elem : XmlElement) (path : List String) : Option String :=
+  (elem.path? path).bind fun e => if e.text.isEmpty then none else some e.text
 
 end XmlElement
 
@@ -134,6 +146,37 @@ private partial def readValue : ReadM String := do
       else advance; go (acc.push c)
   go ""
 
+private partial def readEntity : ReadM Char := do
+  advance
+  let rec entity (e : String) : ReadM String := do
+    match ← peek with
+    | some ';' => advance; pure e
+    | some c => if e.length > 10 then fail "bad entity" else advance; entity (e.push c)
+    | none => fail "unterminated entity"
+  let e ← entity ""
+  match decodeEntity e with
+  | some ch => pure ch
+  | none => fail s!"unknown entity '&{e};'"
+
+/-- Character data up to the next markup (entities decoded); CDATA sections and comments
+inside are read or skipped. -/
+private partial def readText (acc : String) : ReadM String := do
+  if ← startsWith "<![CDATA[" then
+    advance 9
+    let rec cdata (acc : String) : ReadM String := do
+      if ← startsWith "]]>" then advance 3; pure acc
+      else match ← peek with
+        | some c => advance; cdata (acc.push c)
+        | none => fail "unterminated CDATA"
+    readText (← cdata acc)
+  else if ← startsWith "<!--" then skipPast "-->"; readText acc
+  else if ← startsWith "<?" then skipPast "?>"; readText acc
+  else match ← peek with
+    | some '<' => pure acc
+    | some '&' => readText (acc.push (← readEntity))
+    | some c => advance; readText (acc.push c)
+    | none => pure acc
+
 /-- Skip comments, processing instructions, DOCTYPE, CDATA and character data. -/
 private partial def skipMisc : ReadM Unit := do
   skipSpace
@@ -160,17 +203,18 @@ private partial def readElement : ReadM XmlElement := do
       attrs (acc.push ⟨n, v⟩)
   let (as, empty) ← attrs #[]
   if empty then return {name, attrs := as}
-  let rec body (acc : Array XmlElement) : ReadM (Array XmlElement) := do
-    skipMisc
+  let rec body (acc : Array XmlElement) (text : String) : ReadM (Array XmlElement × String) := do
+    let text ← readText text
     if ← startsWith "</" then
       advance 2
       let close ← readName
       if close != name then fail s!"<{name}> closed by </{close}>"
       skipSpace; expect ">"
-      pure acc
+      pure (acc, text)
     else if (← peek).isNone then fail s!"<{name}> is not closed"
-    else body (acc.push (← readElement))
-  return {name, attrs := as, children := ← body #[]}
+    else body (acc.push (← readElement)) text
+  let (children, text) ← body #[] ""
+  return {name, attrs := as, children, text := text.trimAscii.toString}
 
 /-- The document element of an XML text. -/
 def parse (source : String) : Except String XmlElement :=
