@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<!-- Sensors in both spellings: URDF's own <sensor> (urdfdom) and Gazebo's SDF blocks. -->
+<robot name="sensed">
+  <link name="base"/>
+  <link name="head"/>
+  <link name="foot"/>
+  <joint name="neck" type="fixed">
+    <parent link="base"/>
+    <child link="head"/>
+    <origin xyz="0.3 0 0.1" rpy="0 0 0"/>
+  </joint>
+  <joint name="leg" type="revolute">
+    <parent link="base"/>
+    <child link="foot"/>
+    <origin xyz="0 0 -0.3"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1" upper="1" effort="10" velocity="5"/>
+  </joint>
+  <sensor name="front_camera" update_rate="20">
+    <parent link="head"/>
+    <origin xyz="0.05 0 0" rpy="0 0.2 0"/>
+    <camera>
+      <image width="640" height="480" hfov="1.5708" format="RGB8" near="0.01" far="50.0"/>
+    </camera>
+  </sensor>
+  <sensor name="planar_scan" update_rate="10">
+    <parent link="base"/>
+    <origin xyz="0 0 0.2"/>
+    <ray>
+      <horizontal samples="360" resolution="1" min_angle="-3.14159" max_angle="3.14159"/>
+      <vertical samples="1" resolution="1" min_angle="0" max_angle="0"/>
+    </ray>
+  </sensor>
+  <gazebo reference="head">
+    <sensor name="depth" type="depth">
+      <update_rate>30</update_rate>
+      <pose>0.01 0.02 0 0 0 0</pose>
+      <camera>
+        <horizontal_fov>1.5184</horizontal_fov>
+        <image><width>848</width><height>480</height><format>R_FLOAT32</format></image>
+        <clip><near>0.105</near><far>10</far></clip>
+        <noise><type>gaussian</type><mean>0.0</mean><stddev>0.007</stddev></noise>
+      </camera>
+    </sensor>
+  </gazebo>
+  <gazebo reference="base">
+    <material>Gazebo/Grey</material>
+    <sensor name="mid360" type="gpu_lidar">
+      <update_rate>10</update_rate>
+      <lidar>
+        <scan>
+          <horizontal><samples>360</samples><resolution>1</resolution><min_angle>0</min_angle><max_angle>6.2832</max_angle></horizontal>
+          <vertical><samples>32</samples><min_angle>-0.1222</min_angle><max_angle>0.9076</max_angle></vertical>
+        </scan>
+        <range><min>0.1</min><max>40</max><resolution>0.01</resolution></range>
+        <noise type="gaussian"><mean>0</mean><stddev>0.02</stddev></noise>
+      </lidar>
+    </sensor>
+    <sensor name="imu" type="imu">
+      <update_rate>500</update_rate>
+      <imu>
+        <angular_velocity><x><noise type="gaussian"><mean>0</mean><stddev>2e-4</stddev></noise></x></angular_velocity>
+        <linear_acceleration><x><noise type="gaussian"><mean>0</mean><stddev>1.7e-2</stddev></noise></x></linear_acceleration>
+      </imu>
+    </sensor>
+  </gazebo>
+  <gazebo reference="foot">
+    <sensor name="foot_contact" type="contact">
+      <contact><collision>foot_collision</collision></contact>
+      <update_rate>100</update_rate>
+    </sensor>
+  </gazebo>
+</robot>
