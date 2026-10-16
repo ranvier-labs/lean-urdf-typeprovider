@@ -352,6 +352,9 @@ def parseSensor (elem : XmlElement) (reference : Option String := none) : Except
     | some o, _ => parseOrigin (some o)
     | none, some p => parsePose p
     | none, none => pure {}
+  let selfFilter := ((elem.attr? "self_filter").orElse fun _ => elem.textAt? ["self_filter"]).getD ""
+  unless ["", "mount", "robot", "none"].contains selfFilter do
+    .error s!"{ctx}: self_filter must be mount, robot or none, got '{selfFilter}'"
   let rate ← match elem.attr? "update_rate" with
     | some r => parseFloat s!"{ctx}.update_rate" r
     | none => numberOr ctx elem "update_rate" 0
@@ -365,10 +368,7 @@ def parseSensor (elem : XmlElement) (reference : Option String := none) : Except
     ray? := ← ray.mapM parseRay
     imu? := ← (elem.child? "imu").mapM parseImu
     collisions := ((elem.child? "contact").map fun c => (c.childrenNamed "collision").map (·.text)).getD #[]
-    selfFilter := ← match (elem.attr? "self_filter").orElse fun _ => elem.textAt? ["self_filter"] with
-      | none => pure ""
-      | some f => if ["mount", "robot", "none"].contains f then pure f
-        else .error s!"{ctx}: self_filter must be mount, robot or none, got '{f}'"
+    selfFilter
   }
 
 /-- Every sensor of a `<robot>`: its `<sensor>` children and the `<sensor>`s of its
