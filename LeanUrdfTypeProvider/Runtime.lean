@@ -121,6 +121,14 @@ def SensorKind.ofString : String → SensorKind
   | "contact" => .contact
   | raw => .other raw
 
+/-- Event cameras (dynamic vision sensors) have no constructor of their own, so that matches
+over `SensorKind` stay exhaustive: Gazebo has no standard type for them, and they are read as
+`other` with a raw type of `dvs`, `event_camera`, `eventcamera` or `event` (any case). Their
+image geometry is a `<camera>` block, their pixel model `Sensor.events?`. -/
+def SensorKind.isEventCamera : SensorKind → Bool
+  | .other raw => ["dvs", "event_camera", "eventcamera", "event", "event-camera"].contains raw.toLower
+  | _ => false
+
 /-- Additive Gaussian noise (Gazebo's `<noise type="gaussian">`). -/
 structure SensorNoise where
   mean : Float := 0.0
@@ -147,6 +155,39 @@ structure StereoSpec where
   /-- The real imager's size (pixels); 0: the simulated image's. -/
   realWidth : Nat := 848
   realHeight : Nat := 480
+  deriving Repr, BEq, Inhabited
+
+/--
+An event camera's pixel model (an extension, `<dvs …/>` or `<event_camera …/>` inside the
+`<sensor>` or its `<camera>`), after ESIM (Rebecq et al. 2018) and v2e (Hu, Liu, Delbruck 2021):
+a pixel compares its log intensity `L = log(I + logEps)` (low-passed at a cutoff that grows
+with intensity) to a memorized reference and emits an ON (OFF) event when it rises by
+`contrastOn` (falls by `contrastOff`), per-pixel thresholds drawn from a Gaussian of standard
+deviation `sigmaContrast`; then it holds for `refractory` (s). Noise: leak events at
+`leakRate` (Hz per pixel, spread lognormally by `leakDecades`), shot-noise events at
+`shotRate` (Hz per pixel in the dark, times `shotBright` at full intensity), timestamp jitter
+`jitter` (s). The renderer samples the scene at most at the sensor's update rate and at least
+at `minRate` (Hz), adaptively (`adaptive`: the largest per-pixel log change per sample kept
+near `adaptStep`·contrast); `capacity`: events stored per sample (0: 4 per pixel), more are
+counted as dropped. Defaults: an iniVation DAVIS346 as v2e models it (thresholds 0.2, σ 0.03,
+cutoff 300 Hz, leak 0.1 Hz).
+-/
+structure EventCameraSpec where
+  contrastOn : Float := 0.2
+  contrastOff : Float := 0.2
+  sigmaContrast : Float := 0.03
+  refractory : Float := 0.0005
+  cutoffHz : Float := 300
+  leakRate : Float := 0.1
+  leakDecades : Float := 0.1
+  shotRate : Float := 0.0
+  shotBright : Float := 0.25
+  jitter : Float := 0.0
+  logEps : Float := 0.02
+  minRate : Float := 50
+  adaptive : Bool := true
+  adaptStep : Float := 0.5
+  capacity : Nat := 0
   deriving Repr, BEq, Inhabited
 
 /-- A pinhole camera: image size, horizontal field of view (rad), pixel format, clip planes. -/
@@ -208,6 +249,9 @@ structure Sensor where
   /-- What of its own robot the sensor ignores (an extension: `self_filter` attribute or
   element): `mount` (the body it is mounted in, default when empty), `robot`, `none`. -/
   selfFilter : String := ""
+  /-- Event cameras (`SensorKind.isEventCamera`): the pixel model, from `<dvs>` or
+  `<event_camera>` in the sensor or its camera; the defaults when absent. -/
+  events? : Option EventCameraSpec := none
   deriving Repr, BEq, Inhabited
 
 structure Robot where
