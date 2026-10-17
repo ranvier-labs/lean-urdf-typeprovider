@@ -90,6 +90,29 @@ def testStereoDefaultsAndSelfFilter : IO Unit := do
   | .error _ => pure ()
 
 @[test]
+def testEventCamera : IO Unit := do
+  let src := "<robot name=\"r\"><link name=\"a\"/><gazebo reference=\"a\"><sensor name=\"ev\" type=\"dvs\">" ++
+    "<update_rate>1000</update_rate><camera><horizontal_fov>1.2</horizontal_fov><image><width>346</width><height>260</height></image>" ++
+    "<dvs contrast_on=\"0.25\" contrast_off=\"0.3\" refractory=\"0.001\" adaptive=\"false\"><leak_rate>0.5</leak_rate><capacity>1000</capacity></dvs>" ++
+    "</camera></sensor><sensor name=\"plain\" type=\"event_camera\"><camera/></sensor>" ++
+    "<sensor name=\"cam\" type=\"camera\"><camera/></sensor></gazebo></robot>"
+  let robot ← IO.ofExcept (Robot.parse src)
+  let ev := (robot.findSensor? "ev").get!
+  LeanTest.assertTrue (ev.kind.isEventCamera && ev.kind == .other "dvs" && near ev.updateRate 1000)
+  LeanTest.assertTrue (ev.camera?.get!.width == 346 && ev.camera?.get!.height == 260)
+  let e := ev.events?.get!
+  LeanTest.assertTrue (near e.contrastOn 0.25 && near e.contrastOff 0.3 && near e.refractory 0.001 && !e.adaptive)
+  LeanTest.assertTrue (near e.leakRate 0.5 && e.capacity == 1000 && near e.sigmaContrast 0.03 && near e.cutoffHz 300)
+  -- An event camera without a `<dvs>` block gets the defaults; other sensors none.
+  let plain := (robot.findSensor? "plain").get!
+  LeanTest.assertTrue (plain.kind.isEventCamera && plain.events? == some {})
+  LeanTest.assertTrue ((robot.findSensor? "cam").get!.events?.isNone)
+  let bad := "<robot name=\"r\"><link name=\"a\"/><sensor name=\"s\" type=\"dvs\"><parent link=\"a\"/><dvs contrast=\"0\"/></sensor></robot>"
+  match Robot.parse bad with
+  | .ok _ => LeanTest.fail "accepted a zero contrast threshold"
+  | .error _ => pure ()
+
+@[test]
 def testXmlText : IO Unit := do
   let e ← IO.ofExcept (Xml.parse "<a> <b> 1.5 </b><c><![CDATA[x<y]]> &amp; z</c><!-- no --></a>")
   LeanTest.assertEqual (e.textAt? ["b"]) (some "1.5")

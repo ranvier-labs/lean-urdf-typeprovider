@@ -59,6 +59,20 @@ Intel RealSense D435 at 848×480): depth from disparity `f·b/z` at the real ima
 length, Gaussian disparity noise and subpixel quantization (px), minimum depth (m), the
 left imager's invalid band, and dropout at depth edges and anywhere.
 
+A third: event cameras (dynamic vision sensors), `<sensor type="dvs">` (or `event_camera`),
+with their image geometry in a `<camera>` block and their pixel model in `<dvs>` (or
+`<event_camera>`, inside the sensor or its camera):
+
+```xml
+<dvs contrast_on="0.2" contrast_off="0.2" sigma_contrast="0.03" refractory="0.0005"
+     cutoff_hz="300" leak_rate="0.1" leak_decades="0.1" shot_rate="0" shot_bright="0.25"
+     jitter="0" log_eps="0.02" min_rate="50" adaptive="true" adapt_step="0.5" capacity="0"/>
+```
+
+(`EventCameraSpec`, `Sensor.events?`; absent values at these defaults, an iniVation DAVIS346
+as v2e models it). `SensorKind` has no constructor for them, so that existing matches stay
+exhaustive: they parse as `.other "dvs"`, and `SensorKind.isEventCamera` recognizes them.
+
 Sensors often live apart from a robot's description. An overlay is a `<robot>` file with
 only sensors (or other parts) that name the base file's links:
 

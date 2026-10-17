@@ -267,6 +267,48 @@ def parseStereo (elem : XmlElement) : Except String StereoSpec := do
     realHeight := ← natOr "stereo" elem "real_height" d.realHeight
   }
 
+def boolOr (ctx : String) (elem : XmlElement) (name : String) (d : Bool) : Except String Bool :=
+  match (elem.attr? name).orElse fun _ => elem.textAt? [name] with
+  | none => pure d
+  | some raw =>
+    match raw.trimAscii.toString.toLower with
+    | "true" | "1" => pure true
+    | "false" | "0" => pure false
+    | _ => .error s!"{ctx}.{name}: expected true or false, got '{raw}'"
+
+/-- `<dvs contrast_on contrast_off sigma_contrast refractory cutoff_hz leak_rate leak_decades
+shot_rate shot_bright jitter log_eps min_rate adaptive adapt_step capacity/>` (or
+`<event_camera>`; attributes or child elements; absent ones keep `EventCameraSpec`'s defaults;
+`contrast` sets both thresholds). -/
+def parseEventCamera (elem : XmlElement) : Except String EventCameraSpec := do
+  let d : EventCameraSpec := {}
+  let c ← numberOf? "dvs" elem "contrast"
+  let spec : EventCameraSpec := {
+    contrastOn := ← numberOr "dvs" elem "contrast_on" (c.getD d.contrastOn)
+    contrastOff := ← numberOr "dvs" elem "contrast_off" (c.getD d.contrastOff)
+    sigmaContrast := ← numberOr "dvs" elem "sigma_contrast" d.sigmaContrast
+    refractory := ← numberOr "dvs" elem "refractory" d.refractory
+    cutoffHz := ← numberOr "dvs" elem "cutoff_hz" d.cutoffHz
+    leakRate := ← numberOr "dvs" elem "leak_rate" d.leakRate
+    leakDecades := ← numberOr "dvs" elem "leak_decades" d.leakDecades
+    shotRate := ← numberOr "dvs" elem "shot_rate" d.shotRate
+    shotBright := ← numberOr "dvs" elem "shot_bright" d.shotBright
+    jitter := ← numberOr "dvs" elem "jitter" d.jitter
+    logEps := ← numberOr "dvs" elem "log_eps" d.logEps
+    minRate := ← numberOr "dvs" elem "min_rate" d.minRate
+    adaptive := ← boolOr "dvs" elem "adaptive" d.adaptive
+    adaptStep := ← numberOr "dvs" elem "adapt_step" d.adaptStep
+    capacity := ← natOr "dvs" elem "capacity" d.capacity
+  }
+  if spec.contrastOn <= 0 || spec.contrastOff <= 0 then
+    .error s!"dvs: contrast thresholds must be positive, got {spec.contrastOn} and {spec.contrastOff}"
+  pure spec
+
+/-- The `<dvs>` or `<event_camera>` element of a sensor, or of its camera. -/
+def eventCameraElem? (sensor : XmlElement) : Option XmlElement :=
+  let inside (e : XmlElement) := (e.child? "dvs").orElse fun _ => e.child? "event_camera"
+  (inside sensor).orElse fun _ => (sensor.child? "camera").bind inside
+
 /-- A camera: urdfdom's `<camera><image width height hfov format near far/></camera>` or
 SDF's `<camera><horizontal_fov/><image><width/><height/><format/></image><clip><near/><far/></clip></camera>`. -/
 def parseCamera (elem : XmlElement) : Except String CameraSpec := do
@@ -358,9 +400,12 @@ def parseSensor (elem : XmlElement) (reference : Option String := none) : Except
   let rate ← match elem.attr? "update_rate" with
     | some r => parseFloat s!"{ctx}.update_rate" r
     | none => numberOr ctx elem "update_rate" 0
+  let kind := SensorKind.ofString rawType
+  let events? ← match eventCameraElem? elem with
+    | some e => some <$> parseEventCamera e
+    | none => pure (if kind.isEventCamera then some {} else none)
   pure {
-    name, parent, origin, rawType
-    kind := SensorKind.ofString rawType
+    name, parent, origin, rawType, kind, events?
     updateRate := rate
     camera? := ← camera.mapM fun c => do
       -- A depth camera's own noise or clip may sit under <depth_camera>; the image is shared.

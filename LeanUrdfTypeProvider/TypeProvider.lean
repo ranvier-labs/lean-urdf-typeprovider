@@ -209,6 +209,10 @@ private def stereoExpr (t : StereoSpec) : String :=
   typedRecordExpr "StereoSpec"
     s!"baseline := {floatExpr t.baseline}, disparityNoise := {floatExpr t.disparityNoise}, subpixel := {floatExpr t.subpixel}, minDepth := {floatExpr t.minDepth}, edgeThreshold := {floatExpr t.edgeThreshold}, edgeDropout := {floatExpr t.edgeDropout}, dropout := {floatExpr t.dropout}, realWidth := {t.realWidth}, realHeight := {t.realHeight}"
 
+private def eventsExpr (e : EventCameraSpec) : String :=
+  typedRecordExpr "EventCameraSpec"
+    s!"contrastOn := {floatExpr e.contrastOn}, contrastOff := {floatExpr e.contrastOff}, sigmaContrast := {floatExpr e.sigmaContrast}, refractory := {floatExpr e.refractory}, cutoffHz := {floatExpr e.cutoffHz}, leakRate := {floatExpr e.leakRate}, leakDecades := {floatExpr e.leakDecades}, shotRate := {floatExpr e.shotRate}, shotBright := {floatExpr e.shotBright}, jitter := {floatExpr e.jitter}, logEps := {floatExpr e.logEps}, minRate := {floatExpr e.minRate}, adaptive := {if e.adaptive then "true" else "false"}, adaptStep := {floatExpr e.adaptStep}, capacity := {e.capacity}"
+
 private def cameraExpr (c : CameraSpec) : String :=
   typedRecordExpr "CameraSpec"
     s!"width := {c.width}, height := {c.height}, hfov := {floatExpr c.hfov}, format := {leanStringLit c.format}, near := {floatExpr c.near}, far := {floatExpr c.far}, noise? := {optionExpr "SensorNoise" noiseExpr c.noise?}, stereo? := {optionExpr "StereoSpec" stereoExpr c.stereo?}"
@@ -227,7 +231,7 @@ private def imuExpr (i : ImuSpec) : String :=
 
 private def sensorExpr (s : Sensor) : String :=
   typedRecordExpr "Sensor"
-    s!"name := {leanStringLit s.name}, kind := {sensorKindExpr s.kind}, rawType := {leanStringLit s.rawType}, parent := {leanStringLit s.parent}, origin := {originExpr s.origin}, updateRate := {floatExpr s.updateRate}, camera? := {optionExpr "CameraSpec" cameraExpr s.camera?}, ray? := {optionExpr "RaySpec" rayExpr s.ray?}, imu? := {optionExpr "ImuSpec" imuExpr s.imu?}, collisions := ({arrayExpr (s.collisions.map leanStringLit)} : Array String), selfFilter := {leanStringLit s.selfFilter}"
+    s!"name := {leanStringLit s.name}, kind := {sensorKindExpr s.kind}, rawType := {leanStringLit s.rawType}, parent := {leanStringLit s.parent}, origin := {originExpr s.origin}, updateRate := {floatExpr s.updateRate}, camera? := {optionExpr "CameraSpec" cameraExpr s.camera?}, ray? := {optionExpr "RaySpec" rayExpr s.ray?}, imu? := {optionExpr "ImuSpec" imuExpr s.imu?}, collisions := ({arrayExpr (s.collisions.map leanStringLit)} : Array String), selfFilter := {leanStringLit s.selfFilter}, events? := {optionExpr "EventCameraSpec" eventsExpr s.events?}"
 
 private def robotExpr (robot : Robot) : String :=
   typedRecordExpr "Robot"
